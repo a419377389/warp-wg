@@ -32,6 +32,8 @@ func (a *App) handleActivationStatus(w http.ResponseWriter, r *http.Request) {
 				c.ExpiresAt = 0
 				c.AccountCount = 0
 			})
+			// 未授权时停止网关并清理数据
+			a.handleActivationExpired()
 			writeJSON(w, http.StatusOK, map[string]any{"success": true, "activated": false, "error": "unauthorized"})
 			return
 		}
@@ -44,6 +46,11 @@ func (a *App) handleActivationStatus(w http.ResponseWriter, r *http.Request) {
 		c.AccountCount = status.AccountCount
 	})
 
+	// 卡密到期时停止网关并清理账号数据
+	if !status.Active {
+		a.handleActivationExpired()
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":      true,
 		"activated":    true,
@@ -54,6 +61,29 @@ func (a *App) handleActivationStatus(w http.ResponseWriter, r *http.Request) {
 		"serverTime":   status.ServerTime,
 		"deviceId":     status.DeviceID,
 	})
+}
+
+// handleActivationExpired 处理卡密到期：停止网关、Warp并清理账号数据
+func (a *App) handleActivationExpired() {
+	// 停止网关
+	_ = a.stopGateway()
+
+	// 停止 Warp
+	_ = a.stopWarp()
+
+	// 清理账号数据
+	emptySnapshot := AccountsSnapshot{
+		LocalAccounts:    []Account{},
+		TotalVirtualUsed: 0,
+		CurrentAccount:   nil,
+		Source:           "local",
+	}
+	_ = saveAccountsSnapshot(a.paths.AccountsFile, emptySnapshot)
+	a.setMemorySnapshot(emptySnapshot)
+
+	if a.log != nil {
+		a.log.Warn("卡密已到期，已停止网关并清理账号数据")
+	}
 }
 
 func (a *App) handleActivationLogin(w http.ResponseWriter, r *http.Request) {
