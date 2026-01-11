@@ -1,0 +1,13 @@
+{
+  "deviceId": "b303178f7711d66fa4f47a1dad5fe5dd",
+  "token": "",
+  "expiresAt": 0,
+  "accountCount": 0,
+  "warpPath": "",
+  "warpFirebaseApiKey": "",
+  "gatewayPort": 9528,
+  "autoRestartWarp": true,
+  "autoRestartGateway": false,
+  "switchCount": 0,
+  "lastUpdated": 1768013632
+}

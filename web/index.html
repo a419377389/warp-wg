@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Warp 网关控制台</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+  <script defer src="/assets/app.js"></script>
+</head>
+<body>
+  <div class="background">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Warp Gateway</p>
+        <h1>多账号网关控制台</h1>
+        <p class="sub">固定后端 · 本地托管 · 多平台</p>
+      </div>
+      <div class="status-card" id="activationStatusCard">
+        <div class="status-row">
+          <span class="pill" id="activationPill">未激活</span>
+          <span class="status-time" id="activationExpiry">—</span>
+        </div>
+        <div class="status-detail">
+          <div>
+            <p class="label">剩余时间</p>
+            <p class="value" id="activationRemaining">—</p>
+          </div>
+          <div>
+            <p class="label">设备 ID</p>
+            <p class="value mono" id="deviceId">—</p>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="grid">
+      <div class="card">
+        <h2>卡密登录</h2>
+        <div class="field">
+          <label for="codeInput">激活码</label>
+          <input id="codeInput" placeholder="输入卡密" />
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="activateBtn">激活</button>
+          <button class="btn ghost" id="unbindBtn">解绑设备</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>当前账号</h2>
+        <div class="kv">
+          <div>
+            <p class="label">账号邮箱</p>
+            <p class="value" id="currentEmail">—</p>
+          </div>
+          <div>
+            <p class="label">账号状态</p>
+            <p class="value" id="currentStatus">—</p>
+          </div>
+        </div>
+        <div class="kv">
+          <div>
+            <p class="label">额度 / 已用</p>
+            <p class="value" id="currentQuota">—</p>
+          </div>
+          <div>
+            <p class="label">下次刷新</p>
+            <p class="value" id="currentRefresh">—</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="refreshBtn">刷新额度</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>账号池概览</h2>
+        <div class="stat-grid">
+          <div>
+            <p class="label">分配账号数量</p>
+            <p class="value" id="assignedCount">—</p>
+          </div>
+          <div>
+            <p class="label">换号次数</p>
+            <p class="value" id="switchCount">—</p>
+          </div>
+          <div>
+            <p class="label">总额度</p>
+            <p class="value" id="totalQuota">—</p>
+          </div>
+          <div>
+            <p class="label">总已用</p>
+            <p class="value" id="totalUsed">—</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>切换账号</h2>
+        <div class="field">
+          <label for="accountSelect">账号列表</label>
+          <select id="accountSelect"></select>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="switchBtn">切换账号</button>
+        </div>
+      </div>
+
+      <div class="card wide">
+        <h2>Warp 与网关控制</h2>
+        <div class="split">
+          <div>
+            <div class="field">
+              <label for="warpPath">Warp 路径</label>
+              <input id="warpPath" placeholder="自动检测或手动填写" />
+            </div>
+            <div class="actions">
+              <button class="btn" id="autoDetectBtn">自动检测</button>
+              <button class="btn ghost" id="savePathBtn">保存路径</button>
+            </div>
+          </div>
+          <div class="controls">
+            <div class="control-row">
+              <span>Warp 客户端</span>
+              <div class="actions">
+                <button class="btn" id="warpStartBtn">启动</button>
+                <button class="btn ghost" id="warpStopBtn">关闭</button>
+              </div>
+            </div>
+            <div class="control-row">
+              <span>网关代理</span>
+              <div class="actions">
+                <button class="btn primary" id="gatewayStartBtn">启动</button>
+                <button class="btn ghost" id="gatewayStopBtn">关闭</button>
+              </div>
+            </div>
+            <div class="status-line">
+              <span id="gatewayStatus">网关状态：—</span>
+              <span id="warpStatus">Warp 状态：—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card wide">
+        <div class="log-header">
+          <h2>运行日志</h2>
+          <button class="btn ghost" id="clearLogBtn">清空显示</button>
+        </div>
+        <div class="log-box" id="logLines"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+</body>
+</html>

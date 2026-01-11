@@ -1,0 +1,13 @@
+{
+  "deviceId": "307b11815d517bdb0502524956f2f220",
+  "token": "5273e7e5d06ab83881bd7366cebde36a2697de53d06386ac",
+  "expiresAt": 1768099285,
+  "accountCount": 1,
+  "warpPath": "E:\\Program Files\\Warp\\warp.exe",
+  "warpFirebaseApiKey": "",
+  "gatewayPort": 9528,
+  "autoRestartWarp": true,
+  "autoRestartGateway": false,
+  "switchCount": 45,
+  "lastUpdated": 1768013453
+}

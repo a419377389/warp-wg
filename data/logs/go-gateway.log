@@ -1,0 +1,3 @@
+[2026-01-10 10:53:52] [INFO] log file: C:\Users\Administrator\Desktop\warp-1\data\logs\go-gateway.log
+[2026-01-10 10:53:52] [INFO] UI server listening on 127.0.0.1:9530
+[2026-01-10 10:53:52] [ERROR] http server stopped: listen tcp 127.0.0.1:9530: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.

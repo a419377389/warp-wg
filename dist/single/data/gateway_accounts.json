@@ -1,0 +1,39 @@
+{
+  "localAccounts": [
+    {
+      "id": 775,
+      "email": "k18iui_rnw823@aol.com",
+      "apiKey": "",
+      "uid": "",
+      "refreshToken": "",
+      "quota": 500,
+      "used": 281,
+      "status": "normal",
+      "type": "FREE",
+      "nextRefreshTime": "2026-02-04 03:44:29",
+      "lastUsed": 1768013466,
+      "errorCount": 0,
+      "experimentId": "",
+      "bindingUsed": false
+    }
+  ],
+  "totalVirtualUsed": 900,
+  "currentAccount": {
+    "id": 775,
+    "email": "k18iui_rnw823@aol.com",
+    "apiKey": "",
+    "uid": "",
+    "refreshToken": "",
+    "quota": 500,
+    "used": 281,
+    "status": "normal",
+    "type": "FREE",
+    "nextRefreshTime": "2026-02-04 03:44:29",
+    "lastUsed": 1768013466,
+    "errorCount": 0,
+    "experimentId": "",
+    "bindingUsed": false
+  },
+  "lastUpdated": "2026-01-10T02:51:15Z",
+  "source": "local"
+}

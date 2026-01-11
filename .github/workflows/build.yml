@@ -1,0 +1,106 @@
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ""
+            cgo: "1"
+            ldflags: "-s -w"
+          - runner: ubuntu-22.04-arm64
+            goos: linux
+            goarch: arm64
+            ext: ""
+            cgo: "1"
+            ldflags: "-s -w"
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            ext: ""
+            cgo: "1"
+            ldflags: "-s -w"
+          - runner: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ""
+            cgo: "1"
+            ldflags: "-s -w"
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: ".exe"
+            cgo: "0"
+            ldflags: "-s -w -H=windowsgui"
+          - runner: windows-latest
+            goos: windows
+            goarch: arm64
+            ext: ".exe"
+            cgo: "0"
+            ldflags: "-s -w -H=windowsgui"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux deps
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libayatana-appindicator3-dev libgtk-3-dev rpm
+
+      - name: Build
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/single
+          out="dist/single/warp-gateway_${GOOS}_${GOARCH}${{ matrix.ext }}"
+          go build -trimpath -ldflags "${{ matrix.ldflags }}" -o "${out}" .
+          echo "Built ${out}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-gateway_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/single/warp-gateway_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.ext }}
+
+      - name: Package (Linux)
+        if: matrix.goos == 'linux'
+        shell: bash
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          version="$(git describe --tags --match 'v[0-9]*' 2>/dev/null | sed 's/^v//' || echo 0.0.0)"
+          bin="dist/single/warp-gateway_linux_${GOARCH}"
+          bash ./scripts/package-linux.sh "${bin}" "${version}" "${GOARCH}" "dist/packages"
+
+      - name: Upload packages (Linux)
+        if: matrix.goos == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-gateway_${{ matrix.goos }}_${{ matrix.goarch }}_packages
+          path: dist/packages/*
