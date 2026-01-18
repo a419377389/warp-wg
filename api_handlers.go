@@ -623,8 +623,8 @@ func (a *App) handleMCPBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	if payload.AccountID == "" && payload.AccountEmail == "" {
 		// Use current account
-		snapshot := a.getMemorySnapshot()
-		if snapshot.CurrentAccount != nil {
+		snapshot, ok := a.getMemorySnapshot()
+		if ok && snapshot.CurrentAccount != nil {
 			payload.AccountID = accountIdentifier(snapshot.CurrentAccount)
 			payload.AccountEmail = snapshot.CurrentAccount.Email
 		}
