@@ -42,6 +42,11 @@ func (a *App) startHTTP(port int) error {
 	mux.HandleFunc("/api/warp/status", a.handleWarpStatus)
 	mux.HandleFunc("/api/warp/path", a.handleWarpPath)
 	mux.HandleFunc("/api/warp/path/auto", a.handleWarpPathAuto)
+	mux.HandleFunc("/api/mcp/servers", a.handleMCPServers)
+	mux.HandleFunc("/api/mcp/backup", a.handleMCPBackup)
+	mux.HandleFunc("/api/mcp/restore", a.handleMCPRestore)
+	mux.HandleFunc("/api/mcp/backups", a.handleMCPBackups)
+	mux.HandleFunc("/api/mcp/backup/delete", a.handleMCPBackupDelete)
 	mux.HandleFunc("/api/logs/stream", a.handleLogStream)
 	mux.HandleFunc("/api/logs/tail", a.handleLogTail)
 

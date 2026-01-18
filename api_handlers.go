@@ -299,9 +299,14 @@ func (a *App) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(1500 * time.Millisecond)
 	}
 
-	if err := updateWarpCredentialsWithLog(*acc, a.log, "manual"); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
-		return
+	// MCP sync: backup current account's MCP config and restore target's
+	if err := switchAccountWithMCP(snapshot.CurrentAccount, acc, a.log); err != nil {
+		a.log.Warn("switch account with MCP sync failed: " + err.Error())
+		// Fallback to regular credentials update
+		if err := updateWarpCredentialsWithLog(*acc, a.log, "manual"); err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+			return
+		}
 	}
 
 	if restartWarp {
@@ -585,4 +590,114 @@ func (a *App) handleWarpPathAuto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": path})
+}
+
+// MCP Handlers
+
+func (a *App) handleMCPServers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+	servers, err := getMCPServers()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+	active, _ := getActiveMCPServers()
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "servers": servers, "active": active})
+}
+
+func (a *App) handleMCPBackup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+	var payload struct {
+		AccountID    string `json:"accountId"`
+		AccountEmail string `json:"accountEmail"`
+	}
+	if err := readJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "invalid json"})
+		return
+	}
+	if payload.AccountID == "" && payload.AccountEmail == "" {
+		// Use current account
+		snapshot := a.getMemorySnapshot()
+		if snapshot.CurrentAccount != nil {
+			payload.AccountID = accountIdentifier(snapshot.CurrentAccount)
+			payload.AccountEmail = snapshot.CurrentAccount.Email
+		}
+	}
+	if payload.AccountID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "accountId or accountEmail required"})
+		return
+	}
+	if err := backupMCPConfig(payload.AccountID, payload.AccountEmail); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+	a.log.Info("[MCP] backed up config for " + payload.AccountEmail)
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (a *App) handleMCPRestore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+	var payload struct {
+		AccountID string `json:"accountId"`
+	}
+	if err := readJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "invalid json"})
+		return
+	}
+	if payload.AccountID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "accountId required"})
+		return
+	}
+	if err := restoreMCPConfig(payload.AccountID); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+	a.log.Info("[MCP] restored config for " + payload.AccountID)
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (a *App) handleMCPBackups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+	backups, err := listMCPBackups()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "backups": backups})
+}
+
+func (a *App) handleMCPBackupDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+	var payload struct {
+		AccountID string `json:"accountId"`
+	}
+	if err := readJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "invalid json"})
+		return
+	}
+	if payload.AccountID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "accountId required"})
+		return
+	}
+	if err := deleteMCPBackup(payload.AccountID); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+	a.log.Info("[MCP] deleted backup for " + payload.AccountID)
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
