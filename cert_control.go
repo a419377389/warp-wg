@@ -174,7 +174,8 @@ Write-Output "OK"
 }
 
 func checkCertificateTrustedMac() (bool, error) {
-	cmd := exec.Command("security", "find-certificate", "-c", "mitmproxy", "-a")
+	// 检查证书是否在系统钥匙串中（不是 login.keychain）
+	cmd := exec.Command("security", "find-certificate", "-c", "mitmproxy", "-a", "/Library/Keychains/System.keychain")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, nil
@@ -183,15 +184,12 @@ func checkCertificateTrustedMac() (bool, error) {
 }
 
 func installCertificateMac(certPath string) error {
-	home, _ := os.UserHomeDir()
-	loginKeychain := filepath.Join(home, "Library", "Keychains", "login.keychain-db")
-	if err := exec.Command("security", "add-trusted-cert", "-r", "trustRoot", "-k", loginKeychain, certPath).Run(); err == nil {
-		return nil
-	}
-
+	// 直接安装到系统钥匙串并设置信任策略
 	script := fmt.Sprintf(`do shell script "security add-trusted-cert -d -r trustRoot -p ssl -p basic -k /Library/Keychains/System.keychain '%s'" with administrator privileges`, escapeAppleScriptValue(certPath))
-	if err := exec.Command("osascript", "-e", script).Run(); err != nil {
-		return err
+	cmd := exec.Command("osascript", "-e", script)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("osascript failed: %v, output: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

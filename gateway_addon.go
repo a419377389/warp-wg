@@ -937,21 +937,25 @@ func (w *WarpAddon) handleMultiAgentSwitch(action string, status int, reason str
 
 	prevEmail := ""
 	prevID := 0
+	prevUsed := 0
+	prevQuota := 0
 	if current := w.accounts.Current(); current != nil {
 		prevEmail = current.Email
 		prevID = current.ID
+		prevUsed = current.Used
+		prevQuota = current.Quota
 	}
 
 	var next *Account
 	switch action {
 	case "limited":
 		next = w.accounts.MarkCurrentLimited()
-		// 同步状态到远程服务器
-		w.syncAccountStatusToRemote(prevID, "limited")
+		// 同步状态到远程服务器（limited 表示用完，used=quota）
+		w.syncAccountStatusToRemote(prevID, "limited", prevQuota, prevQuota)
 	case "banned":
 		next = w.accounts.MarkCurrentBanned()
 		// 同步状态到远程服务器
-		w.syncAccountStatusToRemote(prevID, "banned")
+		w.syncAccountStatusToRemote(prevID, "banned", prevUsed, prevQuota)
 	default:
 		w.accounts.MarkCurrentError()
 		next = w.accounts.Current()
@@ -977,7 +981,8 @@ func (w *WarpAddon) handleMultiAgentSwitch(action string, status int, reason str
 }
 
 // syncAccountStatusToRemote 同步账号状态到远程服务器
-func (w *WarpAddon) syncAccountStatusToRemote(accountID int, status string) {
+// used 和 quota 可仠为 -1 表示不同步
+func (w *WarpAddon) syncAccountStatusToRemote(accountID int, status string, used int, quota int) {
 	if w.app == nil || w.app.remote == nil || accountID <= 0 {
 		return
 	}
@@ -992,9 +997,9 @@ func (w *WarpAddon) syncAccountStatusToRemote(accountID int, status string) {
 
 	// 同时同步状态、使用量和额度
 	payload := map[string]any{"status": status}
-	if current := w.accounts.Current(); current != nil && current.ID == accountID {
-		payload["used"] = current.Used
-		payload["quota"] = current.Quota
+	if used >= 0 && quota >= 0 {
+		payload["used"] = used
+		payload["quota"] = quota
 	}
 	err := w.app.remote.UpdateAccount(ctx, token, deviceID, accountID, payload)
 	if err != nil {
@@ -1081,15 +1086,17 @@ func (w *WarpAddon) handleLimitedRetry(f *flow.Flow, reason string) bool {
 		return false
 	}
 	prevID := 0
+	prevQuota := 0
 	if current := w.accounts.Current(); current != nil {
 		prevID = current.ID
+		prevQuota = current.Quota
 	}
 	next := w.accounts.MarkCurrentLimited()
 	if next == nil {
 		return false
 	}
-	// 同步状态到远程服务器
-	w.syncAccountStatusToRemote(prevID, "limited")
+	// 同步状态到远程服务器（limited 表示用完，used=quota）
+	w.syncAccountStatusToRemote(prevID, "limited", prevQuota, prevQuota)
 	if w.app != nil && w.app.log != nil {
 		msg := "account limited detected"
 		if strings.TrimSpace(reason) != "" {
@@ -1148,28 +1155,36 @@ func (w *WarpAddon) retryWithNewAccount(f *flow.Flow, maxRetries int) {
 					w.app.log.Warn("retry: account banned detected: " + truncateForLog(textLower, 200))
 				}
 				curID := 0
+				curUsed := 0
+				curQuota := 0
 				if cur := w.accounts.Current(); cur != nil {
 					curID = cur.ID
+					curUsed = cur.Used
+					curQuota = cur.Quota
 				}
 				w.incrementSwitch()
 				w.accounts.MarkCurrentBanned()
-				w.syncAccountStatusToRemote(curID, "banned")
+				w.syncAccountStatusToRemote(curID, "banned", curUsed, curQuota)
 				continue
 			}
 		}
 
-		// 检测 429 (Too Many Requests)
+		// 检测 429 (Too Many Requests) - 注意：429 是限流，不是额度用完，但客户端仍传递完整数据由后端判断
 		if resp.StatusCode == http.StatusTooManyRequests {
 			if w.app != nil && w.app.log != nil {
 				w.app.log.Warn("retry: 429 too many requests: " + truncateForLog(textLower, 200))
 			}
 			curID := 0
+			curUsed := 0
+			curQuota := 0
 			if cur := w.accounts.Current(); cur != nil {
 				curID = cur.ID
+				curUsed = cur.Used
+				curQuota = cur.Quota
 			}
 			w.incrementSwitch()
 			w.accounts.MarkCurrentLimited()
-			w.syncAccountStatusToRemote(curID, "limited")
+			w.syncAccountStatusToRemote(curID, "limited", curUsed, curQuota)
 			continue
 		}
 
@@ -1179,12 +1194,16 @@ func (w *WarpAddon) retryWithNewAccount(f *flow.Flow, maxRetries int) {
 				w.app.log.Warn("retry: 401 unauthorized: " + truncateForLog(textLower, 200))
 			}
 			curID := 0
+			curUsed := 0
+			curQuota := 0
 			if cur := w.accounts.Current(); cur != nil {
 				curID = cur.ID
+				curUsed = cur.Used
+				curQuota = cur.Quota
 			}
 			w.incrementSwitch()
 			w.accounts.MarkCurrentLimited()
-			w.syncAccountStatusToRemote(curID, "limited")
+			w.syncAccountStatusToRemote(curID, "limited", curUsed, curQuota)
 			continue
 		}
 
