@@ -249,23 +249,15 @@ func updateWarpCredentialsLinux(account Account) error {
 	// 2. 同时写入 JSON 文件作为备用
 	userFile := warpUserFile()
 	apiFile := warpAPIKeysFile()
-	if fileLooksLikeJSON(userFile) || !pathExists(userFile) {
-		_ = os.MkdirAll(filepath.Dir(userFile), 0o755)
-		raw, _ := json.Marshal(userJSON)
-		if err := os.WriteFile(userFile, raw, 0o644); err != nil {
-			return err
-		}
-	} else {
-		return errors.New("warp user file format unsupported")
+	_ = os.MkdirAll(filepath.Dir(userFile), 0o755)
+	raw, _ := json.Marshal(userJSON)
+	if err := os.WriteFile(userFile, raw, 0o644); err != nil {
+		return err
 	}
 
-	if fileLooksLikeJSON(apiFile) || !pathExists(apiFile) {
-		raw, _ := json.Marshal(apiKeysJSON)
-		if err := os.WriteFile(apiFile, raw, 0o644); err != nil {
-			return err
-		}
-	} else {
-		return errors.New("warp api keys file format unsupported")
+	raw, _ = json.Marshal(apiKeysJSON)
+	if err := os.WriteFile(apiFile, raw, 0o644); err != nil {
+		return err
 	}
 
 	return nil
