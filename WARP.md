@@ -137,6 +137,7 @@ go test ./...
 1. 备份当前本地 MCP 配置 → `~/.warp-gateway/mcp_backups/global_mcp_mcp.json`
 2. 更新 Warp 凭证
 3. 恢复同一份全局 MCP 配置
+4. 延迟再恢复一次（防止 Warp 启动覆盖）
 
 ## Warp 数据位置
 | 平台 | 路径 |

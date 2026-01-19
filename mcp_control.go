@@ -11,6 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 const mcpGlobalBackupKey = "global_mcp"
+const mcpGlobalRestoreDelay = 3 * time.Second
 
 // MCPServer represents an MCP server configuration
 type MCPServer struct {
@@ -449,8 +450,28 @@ func switchAccountWithMCP(currentAccount, targetAccount *Account, log *Logger) e
 	} else if log != nil {
 		log.Info("[MCP] no global MCP backup found")
 	}
+	scheduleGlobalMCPRestore(mcpGlobalRestoreDelay, log)
 
 	return nil
+}
+
+func scheduleGlobalMCPRestore(delay time.Duration, log *Logger) {
+	if delay <= 0 {
+		delay = 2 * time.Second
+	}
+	time.AfterFunc(delay, func() {
+		if !hasMCPBackup(mcpGlobalBackupKey) {
+			return
+		}
+		if log != nil {
+			log.Info("[MCP] restoring global MCP config (delayed)")
+		}
+		if err := restoreMCPConfig(mcpGlobalBackupKey); err != nil {
+			if log != nil {
+				log.Warn("[MCP] delayed restore failed: " + err.Error())
+			}
+		}
+	})
 }
 
 // accountIdentifier generates a unique identifier for an account
