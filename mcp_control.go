@@ -653,6 +653,7 @@ func getMCPAllowlistFromProfiles(db *sql.DB) []string {
 }
 
 // setMCPAllowlistToProfiles updates mcp_allowlist in all agent profiles in generic_string_objects
+// If no agent profile exists, creates a default one
 func setMCPAllowlistToProfiles(db *sql.DB, allowlist []string) error {
 	rows, err := db.Query("SELECT id, data FROM generic_string_objects")
 	if err != nil {
@@ -665,6 +666,7 @@ func setMCPAllowlistToProfiles(db *sql.DB, allowlist []string) error {
 		data string
 	}
 	var profiles []profileRow
+	var agentProfileFound bool
 
 	for rows.Next() {
 		var id int
@@ -692,6 +694,8 @@ func setMCPAllowlistToProfiles(db *sql.DB, allowlist []string) error {
 			}
 		}
 
+		agentProfileFound = true
+
 		// Update mcp_allowlist
 		profile["mcp_allowlist"] = allowlist
 
@@ -703,6 +707,37 @@ func setMCPAllowlistToProfiles(db *sql.DB, allowlist []string) error {
 
 		// Update in database
 		_, err = db.Exec("UPDATE generic_string_objects SET data = ? WHERE id = ?", string(newData), p.id)
+		if err != nil {
+			return err
+		}
+	}
+
+	// If no agent profile found, create a default one with the MCP allowlist
+	if !agentProfileFound && len(allowlist) > 0 {
+		defaultProfile := map[string]any{
+			"name":                        "Default",
+			"is_default_profile":          true,
+			"apply_code_diffs":            "AgentDecides",
+			"read_files":                  "AgentDecides",
+			"execute_commands":            "AlwaysAsk",
+			"write_to_pty":                "AlwaysAsk",
+			"mcp_permissions":             "AgentDecides",
+			"command_denylist":            []any{},
+			"command_allowlist":           []any{},
+			"directory_allowlist":         []any{},
+			"mcp_allowlist":               allowlist,
+			"mcp_denylist":                []any{},
+			"base_model":                  nil,
+			"coding_model":                nil,
+			"cli_agent_model":             nil,
+			"autosync_plans_to_warp_drive": true,
+			"web_search_enabled":          true,
+		}
+		newData, err := json.Marshal(defaultProfile)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec("INSERT INTO generic_string_objects (data) VALUES (?)", string(newData))
 		if err != nil {
 			return err
 		}
