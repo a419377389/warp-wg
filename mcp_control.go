@@ -333,13 +333,34 @@ func restoreMCPConfig(accountID string) error {
 	}
 
 	// Restore active_mcp_servers
-	for _, row := range backup.ActiveMCPServers {
-		_, err = tx.Exec(
-			"INSERT INTO active_mcp_servers (id, mcp_server_uuid) VALUES (?, ?)",
-			row.ID, row.MCPServerUUID,
-		)
-		if err != nil {
-			return err
+	if len(backup.ActiveMCPServers) > 0 {
+		for _, row := range backup.ActiveMCPServers {
+			_, err = tx.Exec(
+				"INSERT INTO active_mcp_servers (id, mcp_server_uuid) VALUES (?, ?)",
+				row.ID, row.MCPServerUUID,
+			)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		// Fallback: auto-activate all restored servers when no active list is present
+		seen := map[string]struct{}{}
+		for _, row := range backup.MCPServerInstallations {
+			uuid := mcpServerUUIDFromTemplate(row.TemplatableMCPServer)
+			if uuid == "" {
+				continue
+			}
+			if _, ok := seen[uuid]; ok {
+				continue
+			}
+			seen[uuid] = struct{}{}
+			if _, err = tx.Exec(
+				"INSERT INTO active_mcp_servers (mcp_server_uuid) VALUES (?)",
+				uuid,
+			); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -546,4 +567,15 @@ func asMap(v any) map[string]any {
 		return m
 	}
 	return nil
+}
+
+func mcpServerUUIDFromTemplate(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(raw), &payload) != nil {
+		return ""
+	}
+	return asString(payload["uuid"])
 }
