@@ -88,6 +88,8 @@ func (a *App) startGateway(port int) (int, error) {
 			a.log.Error("warp account prepare failed: " + err.Error())
 		}
 		_, _ = a.startWarp(fmt.Sprintf("http://127.0.0.1:%d", port))
+		// Schedule MCP restore after Warp starts
+		scheduleGlobalMCPRestore(5*time.Second, a.log)
 	}
 
 	return port, nil

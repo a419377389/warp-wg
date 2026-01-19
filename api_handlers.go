@@ -318,6 +318,8 @@ func (a *App) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 			proxy = "http://127.0.0.1:" + strconv.Itoa(port)
 		}
 		_, _ = a.startWarp(proxy)
+		// Schedule MCP restore after Warp starts
+		scheduleGlobalMCPRestore(5*time.Second, a.log)
 	}
 
 	if mcpHandled {
