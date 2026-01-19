@@ -624,27 +624,17 @@ func (a *App) handleMCPBackup(w http.ResponseWriter, r *http.Request) {
 		AccountID    string `json:"accountId"`
 		AccountEmail string `json:"accountEmail"`
 	}
-	if err := readJSON(r, &payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "invalid json"})
-		return
-	}
-	if payload.AccountID == "" && payload.AccountEmail == "" {
-		// Use current account
-		snapshot, ok := a.getMemorySnapshot()
-		if ok && snapshot.CurrentAccount != nil {
-			payload.AccountID = accountIdentifier(snapshot.CurrentAccount)
+	_ = readJSON(r, &payload)
+	if payload.AccountEmail == "" {
+		if snapshot, ok := a.getMemorySnapshot(); ok && snapshot.CurrentAccount != nil {
 			payload.AccountEmail = snapshot.CurrentAccount.Email
 		}
 	}
-	if payload.AccountID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "accountId or accountEmail required"})
-		return
-	}
-	if err := backupMCPConfig(payload.AccountID, payload.AccountEmail); err != nil {
+	if err := backupMCPConfig(mcpGlobalBackupKey, payload.AccountEmail); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
 		return
 	}
-	a.log.Info("[MCP] backed up config for " + payload.AccountEmail)
+	a.log.Info("[MCP] backed up global config")
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
@@ -656,19 +646,12 @@ func (a *App) handleMCPRestore(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		AccountID string `json:"accountId"`
 	}
-	if err := readJSON(r, &payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "invalid json"})
-		return
-	}
-	if payload.AccountID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "accountId required"})
-		return
-	}
-	if err := restoreMCPConfig(payload.AccountID); err != nil {
+	_ = readJSON(r, &payload)
+	if err := restoreMCPConfig(mcpGlobalBackupKey); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
 		return
 	}
-	a.log.Info("[MCP] restored config for " + payload.AccountID)
+	a.log.Info("[MCP] restored global config")
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
@@ -677,12 +660,16 @@ func (a *App) handleMCPBackups(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
 		return
 	}
-	backups, err := listMCPBackups()
+	info, err := getMCPBackupInfo(mcpGlobalBackupKey)
 	if err != nil {
+		if strings.Contains(err.Error(), "no MCP backup found") {
+			writeJSON(w, http.StatusOK, map[string]any{"success": true, "backups": []MCPBackupInfo{}})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "backups": backups})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "backups": []MCPBackupInfo{*info}})
 }
 
 func (a *App) handleMCPBackupDelete(w http.ResponseWriter, r *http.Request) {
@@ -693,18 +680,11 @@ func (a *App) handleMCPBackupDelete(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		AccountID string `json:"accountId"`
 	}
-	if err := readJSON(r, &payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "invalid json"})
-		return
-	}
-	if payload.AccountID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "accountId required"})
-		return
-	}
-	if err := deleteMCPBackup(payload.AccountID); err != nil {
+	_ = readJSON(r, &payload)
+	if err := deleteMCPBackup(mcpGlobalBackupKey); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
 		return
 	}
-	a.log.Info("[MCP] deleted backup for " + payload.AccountID)
+	a.log.Info("[MCP] deleted global backup")
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }

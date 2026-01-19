@@ -52,7 +52,7 @@ go test ./...
 | `logs/` | 日志目录 |
 
 ### MCP 备份目录
-`~/.warp-gateway/mcp_backups/` - 存储各账号的 MCP 配置备份
+`~/.warp-gateway/mcp_backups/` - 存储全局 MCP 配置备份（`global_mcp_mcp.json`）
 
 ## 项目架构
 
@@ -89,7 +89,7 @@ go test ./...
 - **warp_transport.go** - 自定义 HTTP Transport，UTLS 支持
 - **warp_api.go** - Warp GraphQL API 调用（用量查询）
 
-### MCP 配置同步（新增）
+### MCP 配置同步（全局）
 - **mcp_control.go** - MCP 配置的读取、备份、恢复
   - `getMCPServers()` - 读取当前 MCP 服务器列表
   - `backupMCPConfig()` - 备份 MCP 配置到文件
@@ -133,10 +133,10 @@ go test ./...
 4. `mcp_control.go` - MCP 配置同步
 
 ### MCP 同步机制
-账号切换时自动执行：
-1. 备份当前账号 MCP 配置 → `~/.warp-gateway/mcp_backups/{email}_mcp.json`
+账号切换时自动执行（全局 MCP）：
+1. 备份当前本地 MCP 配置 → `~/.warp-gateway/mcp_backups/global_mcp_mcp.json`
 2. 更新 Warp 凭证
-3. 恢复目标账号 MCP 配置（如有备份）
+3. 恢复同一份全局 MCP 配置
 
 ## Warp 数据位置
 | 平台 | 路径 |
