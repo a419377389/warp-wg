@@ -244,21 +244,32 @@ func updateWarpCredentialsLinux(account Account) error {
 	}
 
 	// 1. 尝试写入系统密钥环 (secret-tool)
-	_ = updateWarpCredentialsLinuxKeyring(userJSON)
+	if err := updateWarpCredentialsLinuxKeyring(userJSON); err != nil {
+		fmt.Printf("[DEBUG] Linux keyring write failed: %v\n", err)
+	} else {
+		fmt.Printf("[DEBUG] Linux keyring write success\n")
+	}
 
 	// 2. 同时写入 JSON 文件作为备用
 	userFile := warpUserFile()
 	apiFile := warpAPIKeysFile()
+	fmt.Printf("[DEBUG] Linux data dir: %s\n", warpDataDir())
+	fmt.Printf("[DEBUG] Linux user file: %s\n", userFile)
+	fmt.Printf("[DEBUG] Linux api file: %s\n", apiFile)
 	_ = os.MkdirAll(filepath.Dir(userFile), 0o755)
 	raw, _ := json.Marshal(userJSON)
 	if err := os.WriteFile(userFile, raw, 0o644); err != nil {
+		fmt.Printf("[DEBUG] Linux user file write failed: %v\n", err)
 		return err
 	}
+	fmt.Printf("[DEBUG] Linux user file written: %d bytes\n", len(raw))
 
 	raw, _ = json.Marshal(apiKeysJSON)
 	if err := os.WriteFile(apiFile, raw, 0o644); err != nil {
+		fmt.Printf("[DEBUG] Linux api file write failed: %v\n", err)
 		return err
 	}
+	fmt.Printf("[DEBUG] Linux api file written: %d bytes\n", len(raw))
 
 	return nil
 }
