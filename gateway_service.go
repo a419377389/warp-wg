@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,10 +81,22 @@ func newGatewayService(app *App, port int) (*GatewayService, error) {
 		if prev == "" && current.Email == "" {
 			return
 		}
+		if app.consumeMCPSyncSkip(current.Email) {
+			return
+		}
 		_ = app.updateConfig(func(cfg *LocalConfig) {
 			cfg.SwitchCount += 1
 		})
-		_ = updateWarpCredentialsWithLog(*current, app.log, reason)
+		var prevAcc *Account
+		if strings.TrimSpace(prev) != "" {
+			prevAcc = &Account{Email: prev}
+		}
+		if err := switchAccountWithMCP(prevAcc, current, app.log); err != nil {
+			if app.log != nil {
+				app.log.Warn("switch account with MCP sync failed: " + err.Error())
+			}
+			_ = updateWarpCredentialsWithLog(*current, app.log, reason)
+		}
 	})
 	if snapshot, ok := app.getMemorySnapshot(); ok {
 		accountMgr.LoadSnapshot(snapshot, true)

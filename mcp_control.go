@@ -10,6 +10,7 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+const mcpGlobalBackupKey = "global_mcp"
 
 // MCPServer represents an MCP server configuration
 type MCPServer struct {
@@ -414,18 +415,19 @@ func deleteMCPBackup(accountID string) error {
 // switchAccountWithMCP performs account switch with MCP config sync
 // It backs up current account's MCP config and restores target account's MCP config
 func switchAccountWithMCP(currentAccount, targetAccount *Account, log *Logger) error {
-	// Backup current account's MCP config if we have a current account
-	if currentAccount != nil && currentAccount.Email != "" {
-		accountID := accountIdentifier(currentAccount)
+	// Backup global MCP config before switching accounts
+	accountEmail := ""
+	if currentAccount != nil {
+		accountEmail = currentAccount.Email
+	}
+	if log != nil {
+		log.Info("[MCP] backing up global MCP config")
+	}
+	if err := backupMCPConfig(mcpGlobalBackupKey, accountEmail); err != nil {
 		if log != nil {
-			log.Info("[MCP] backing up MCP config for " + currentAccount.Email)
+			log.Warn("[MCP] backup failed: " + err.Error())
 		}
-		if err := backupMCPConfig(accountID, currentAccount.Email); err != nil {
-			if log != nil {
-				log.Warn("[MCP] backup failed: " + err.Error())
-			}
-			// Don't fail the switch, just log the error
-		}
+		// Don't fail the switch, just log the error
 	}
 
 	// Update Warp credentials for target account
@@ -433,24 +435,19 @@ func switchAccountWithMCP(currentAccount, targetAccount *Account, log *Logger) e
 		return err
 	}
 
-	// Restore target account's MCP config if backup exists
-	if targetAccount != nil && targetAccount.Email != "" {
-		accountID := accountIdentifier(targetAccount)
-		if hasMCPBackup(accountID) {
-			if log != nil {
-				log.Info("[MCP] restoring MCP config for " + targetAccount.Email)
-			}
-			if err := restoreMCPConfig(accountID); err != nil {
-				if log != nil {
-					log.Warn("[MCP] restore failed: " + err.Error())
-				}
-				// Don't fail the switch, just log the error
-			}
-		} else {
-			if log != nil {
-				log.Info("[MCP] no MCP backup found for " + targetAccount.Email)
-			}
+	// Restore global MCP config after switching
+	if hasMCPBackup(mcpGlobalBackupKey) {
+		if log != nil {
+			log.Info("[MCP] restoring global MCP config")
 		}
+		if err := restoreMCPConfig(mcpGlobalBackupKey); err != nil {
+			if log != nil {
+				log.Warn("[MCP] restore failed: " + err.Error())
+			}
+			// Don't fail the switch, just log the error
+		}
+	} else if log != nil {
+		log.Info("[MCP] no global MCP backup found")
 	}
 
 	return nil

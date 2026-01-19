@@ -300,6 +300,7 @@ func (a *App) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// MCP sync: backup current account's MCP config and restore target's
+	mcpHandled := false
 	if err := switchAccountWithMCP(snapshot.CurrentAccount, acc, a.log); err != nil {
 		a.log.Warn("switch account with MCP sync failed: " + err.Error())
 		// Fallback to regular credentials update
@@ -307,6 +308,8 @@ func (a *App) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
 			return
 		}
+	} else {
+		mcpHandled = true
 	}
 
 	if restartWarp {
@@ -315,6 +318,10 @@ func (a *App) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 			proxy = "http://127.0.0.1:" + strconv.Itoa(port)
 		}
 		_, _ = a.startWarp(proxy)
+	}
+
+	if mcpHandled {
+		a.markMCPSyncHandled(acc.Email)
 	}
 
 	acc.LastUsed = float64(time.Now().Unix())
