@@ -6,12 +6,31 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 const mcpGlobalBackupKey = "global_mcp"
 const mcpGlobalRestoreDelay = 3 * time.Second
+
+func mcpServerInstallationsCount() int {
+	dbPath := warpSQLiteDB()
+	if dbPath == "" || !pathExists(dbPath) {
+		return -1
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return -1
+	}
+	defer db.Close()
+	row := db.QueryRow("SELECT COUNT(*) FROM mcp_server_installations")
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return -1
+	}
+	return count
+}
 
 // MCPServer represents an MCP server configuration
 type MCPServer struct {
@@ -421,14 +440,21 @@ func switchAccountWithMCP(currentAccount, targetAccount *Account, log *Logger) e
 	if currentAccount != nil {
 		accountEmail = currentAccount.Email
 	}
-	if log != nil {
-		log.Info("[MCP] backing up global MCP config")
-	}
-	if err := backupMCPConfig(mcpGlobalBackupKey, accountEmail); err != nil {
+	currentCount := mcpServerInstallationsCount()
+	if currentCount <= 0 && hasMCPBackup(mcpGlobalBackupKey) {
 		if log != nil {
-			log.Warn("[MCP] backup failed: " + err.Error())
+			log.Info("[MCP] skip backup: no MCP servers in database")
 		}
-		// Don't fail the switch, just log the error
+	} else {
+		if log != nil {
+			log.Info("[MCP] backing up global MCP config")
+		}
+		if err := backupMCPConfig(mcpGlobalBackupKey, accountEmail); err != nil {
+			if log != nil {
+				log.Warn("[MCP] backup failed: " + err.Error())
+			}
+			// Don't fail the switch, just log the error
+		}
 	}
 
 	// Update Warp credentials for target account
@@ -459,19 +485,27 @@ func scheduleGlobalMCPRestore(delay time.Duration, log *Logger) {
 	if delay <= 0 {
 		delay = 2 * time.Second
 	}
-	time.AfterFunc(delay, func() {
-		if !hasMCPBackup(mcpGlobalBackupKey) {
-			return
-		}
-		if log != nil {
-			log.Info("[MCP] restoring global MCP config (delayed)")
-		}
-		if err := restoreMCPConfig(mcpGlobalBackupKey); err != nil {
+	delays := []time.Duration{delay, 10 * time.Second, 30 * time.Second}
+	go func() {
+		for i, wait := range delays {
+			time.Sleep(wait)
+			if !hasMCPBackup(mcpGlobalBackupKey) {
+				return
+			}
 			if log != nil {
-				log.Warn("[MCP] delayed restore failed: " + err.Error())
+				log.Info("[MCP] restoring global MCP config (delayed #" + strconv.Itoa(i+1) + ")")
+			}
+			if err := restoreMCPConfig(mcpGlobalBackupKey); err != nil {
+				if log != nil {
+					log.Warn("[MCP] delayed restore failed: " + err.Error())
+				}
+				continue
+			}
+			if mcpServerInstallationsCount() > 0 {
+				return
 			}
 		}
-	})
+	}()
 }
 
 // accountIdentifier generates a unique identifier for an account
