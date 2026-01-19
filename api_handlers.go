@@ -296,7 +296,7 @@ func (a *App) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 
 	if restartWarp {
 		_ = a.stopWarp()
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(2500 * time.Millisecond)
 	}
 
 	// MCP sync: backup current account's MCP config and restore target's

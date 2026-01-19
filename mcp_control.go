@@ -53,6 +53,7 @@ type MCPBackup struct {
 	MCPServerInstallations []MCPInstallRow  `json:"mcp_server_installations"`
 	MCPEnvironmentVars     []MCPEnvVarRow   `json:"mcp_environment_variables"`
 	ActiveMCPServers       []MCPActiveRow   `json:"active_mcp_servers"`
+	MCPAllowlist           []string         `json:"mcp_allowlist,omitempty"`
 }
 
 // MCPInstallRow represents a row from mcp_server_installations table
@@ -249,6 +250,14 @@ func backupMCPConfig(accountID, accountEmail string) error {
 		}
 	}
 
+	// Backup mcp_allowlist from generic_string_objects (agent profiles)
+	backup.MCPAllowlist = getMCPAllowlistFromProfiles(db)
+
+	// Skip saving if no MCP data found
+	if len(backup.MCPServerInstallations) == 0 {
+		return nil
+	}
+
 	// Save backup to file
 	data, err := json.MarshalIndent(backup, "", "  ")
 	if err != nil {
@@ -277,6 +286,11 @@ func restoreMCPConfig(accountID string) error {
 	var backup MCPBackup
 	if err := json.Unmarshal(data, &backup); err != nil {
 		return err
+	}
+
+	// Skip restore if backup has no MCP data
+	if len(backup.MCPServerInstallations) == 0 {
+		return nil
 	}
 
 	dbPath := warpSQLiteDB()
@@ -332,19 +346,25 @@ func restoreMCPConfig(accountID string) error {
 		}
 	}
 
-	// Restore active_mcp_servers
+	// Restore active_mcp_servers (legacy, may not be used by Warp anymore)
 	if len(backup.ActiveMCPServers) > 0 {
 		for _, row := range backup.ActiveMCPServers {
-			_, err = tx.Exec(
+			_, _ = tx.Exec(
 				"INSERT INTO active_mcp_servers (id, mcp_server_uuid) VALUES (?, ?)",
 				row.ID, row.MCPServerUUID,
 			)
-			if err != nil {
-				return err
-			}
 		}
-	} else {
-		// Fallback: auto-activate all restored servers when no active list is present
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+
+	// Restore mcp_allowlist to agent profiles in generic_string_objects
+	// This is the actual mechanism Warp uses to track enabled MCP servers
+	allowlist := backup.MCPAllowlist
+	if len(allowlist) == 0 {
+		// Fallback: use UUIDs from installations
 		seen := map[string]struct{}{}
 		for _, row := range backup.MCPServerInstallations {
 			uuid := mcpServerUUIDFromTemplate(row.TemplatableMCPServer)
@@ -355,16 +375,16 @@ func restoreMCPConfig(accountID string) error {
 				continue
 			}
 			seen[uuid] = struct{}{}
-			if _, err = tx.Exec(
-				"INSERT INTO active_mcp_servers (mcp_server_uuid) VALUES (?)",
-				uuid,
-			); err != nil {
-				return err
-			}
+			allowlist = append(allowlist, uuid)
+		}
+	}
+	if len(allowlist) > 0 {
+		if err := setMCPAllowlistToProfiles(db, allowlist); err != nil {
+			return err
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // hasMCPBackup checks if an account has an MCP backup
@@ -586,4 +606,107 @@ func mcpServerUUIDFromTemplate(raw string) string {
 		return ""
 	}
 	return asString(payload["uuid"])
+}
+
+// getMCPAllowlistFromProfiles reads mcp_allowlist from agent profiles in generic_string_objects
+func getMCPAllowlistFromProfiles(db *sql.DB) []string {
+	rows, err := db.Query("SELECT id, data FROM generic_string_objects")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var allowlist []string
+	seen := map[string]struct{}{}
+
+	for rows.Next() {
+		var id int
+		var data string
+		if err := rows.Scan(&id, &data); err != nil {
+			continue
+		}
+		if data == "" {
+			continue
+		}
+
+		var profile map[string]any
+		if json.Unmarshal([]byte(data), &profile) != nil {
+			continue
+		}
+
+		// Check if this is an agent profile (has mcp_allowlist field)
+		if mcpList, ok := profile["mcp_allowlist"]; ok {
+			if arr, ok := mcpList.([]any); ok {
+				for _, v := range arr {
+					if uuid, ok := v.(string); ok && uuid != "" {
+						if _, exists := seen[uuid]; !exists {
+							seen[uuid] = struct{}{}
+							allowlist = append(allowlist, uuid)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return allowlist
+}
+
+// setMCPAllowlistToProfiles updates mcp_allowlist in all agent profiles in generic_string_objects
+func setMCPAllowlistToProfiles(db *sql.DB, allowlist []string) error {
+	rows, err := db.Query("SELECT id, data FROM generic_string_objects")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type profileRow struct {
+		id   int
+		data string
+	}
+	var profiles []profileRow
+
+	for rows.Next() {
+		var id int
+		var data string
+		if err := rows.Scan(&id, &data); err != nil {
+			continue
+		}
+		if data == "" {
+			continue
+		}
+		profiles = append(profiles, profileRow{id: id, data: data})
+	}
+	rows.Close()
+
+	for _, p := range profiles {
+		var profile map[string]any
+		if json.Unmarshal([]byte(p.data), &profile) != nil {
+			continue
+		}
+
+		// Check if this is an agent profile (has mcp_allowlist or mcp_permissions field)
+		if _, ok := profile["mcp_allowlist"]; !ok {
+			if _, ok := profile["mcp_permissions"]; !ok {
+				continue
+			}
+		}
+
+		// Update mcp_allowlist
+		profile["mcp_allowlist"] = allowlist
+
+		// Serialize back
+		newData, err := json.Marshal(profile)
+		if err != nil {
+			continue
+		}
+
+		// Update in database
+		_, err = db.Exec("UPDATE generic_string_objects SET data = ? WHERE id = ?", string(newData), p.id)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

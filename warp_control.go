@@ -64,6 +64,14 @@ func (a *App) startWarp(proxy string) (string, error) {
 	a.warpMu.Lock()
 	defer a.warpMu.Unlock()
 
+	// Restore global MCP config BEFORE Warp starts
+	if hasMCPBackup(mcpGlobalBackupKey) {
+		if a.log != nil {
+			a.log.Info("[MCP] restoring global MCP config before Warp start")
+		}
+		_ = restoreMCPConfig(mcpGlobalBackupKey)
+	}
+
 	if err := ensureCertificateReady(a.log); err != nil {
 		return "", err
 	}
