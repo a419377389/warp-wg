@@ -506,11 +506,19 @@ func scheduleGlobalMCPRestore(delay time.Duration, log *Logger) {
 	if delay <= 0 {
 		delay = 2 * time.Second
 	}
-	delays := []time.Duration{delay, 10 * time.Second, 30 * time.Second}
+	delays := []time.Duration{delay, 10 * time.Second, 30 * time.Second, 60 * time.Second, 120 * time.Second}
+	expected := -1
+	if info, err := getMCPBackupInfo(mcpGlobalBackupKey); err == nil && info != nil {
+		expected = info.ServerCount
+	}
 	go func() {
 		for i, wait := range delays {
 			time.Sleep(wait)
 			if !hasMCPBackup(mcpGlobalBackupKey) {
+				return
+			}
+			current := mcpServerInstallationsCount()
+			if expected > 0 && current >= expected {
 				return
 			}
 			if log != nil {
@@ -522,7 +530,7 @@ func scheduleGlobalMCPRestore(delay time.Duration, log *Logger) {
 				}
 				continue
 			}
-			if mcpServerInstallationsCount() > 0 {
+			if expected > 0 && mcpServerInstallationsCount() >= expected {
 				return
 			}
 		}
