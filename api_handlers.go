@@ -159,6 +159,23 @@ func (a *App) handleActivationUnbind(w http.ResponseWriter, r *http.Request) {
 		c.ExpiresAt = 0
 		c.AccountCount = 0
 	})
+
+	// 解绑时清理本地账号数据，防止重新激活时使用旧账号
+	_ = a.stopGateway()
+	_ = a.stopWarp()
+	emptySnapshot := AccountsSnapshot{
+		LocalAccounts:    []Account{},
+		TotalVirtualUsed: 0,
+		CurrentAccount:   nil,
+		Source:           "local",
+	}
+	_ = saveAccountsSnapshot(a.paths.AccountsFile, emptySnapshot)
+	a.setMemorySnapshot(emptySnapshot)
+
+	if a.log != nil {
+		a.log.Info("设备已解绑，已清理本地账号数据")
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 

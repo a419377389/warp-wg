@@ -529,6 +529,10 @@ func (w *WarpAddon) ensureAvailableAccount() *Account {
 
 		if !accountIsAvailable(current) || accountRemaining(current) <= 0 {
 			oldEmail := current.Email
+			// 当前账号在本地看来额度已不可用时，通知远端做一次额度复查和分类
+			if w != nil && current.ID > 0 {
+				w.syncAccountStatusToRemote(current.ID, "limited", current.Used, current.Quota)
+			}
 			w.accounts.MarkCurrentLimitedSoft()
 			next := w.accounts.SelectAvailableAccount()
 			if next != nil && !strings.EqualFold(oldEmail, next.Email) {
