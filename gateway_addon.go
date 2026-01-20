@@ -1300,27 +1300,31 @@ func (w *WarpAddon) modifyQuotaResponse(f *flow.Flow) {
 	if _, ok := limitInfo["requestLimit"]; ok {
 		realUsed := asInt(limitInfo["requestsUsedSinceLastRefresh"], 0)
 		realQuota := asInt(limitInfo["requestLimit"], 150)
+		// 在切换前保存旧账号信息，用于同步到后端
+		oldAccount := w.accounts.Current()
 		virtualUsed, virtualQuota, needSwitch := w.accounts.SyncUsage(realUsed, realQuota)
 		limitInfo["requestsUsedSinceLastRefresh"] = virtualUsed
 		limitInfo["requestLimit"] = virtualQuota
 		modified = true
 		w.printStatus(virtualUsed, virtualQuota)
-		// 仅在账号额度用完时同步到后台
-		if needSwitch {
-			w.syncCurrentUsageToRemote()
+		// 账号额度用完时，同步旧账号状态到后台（触发后端二次检测）
+		if needSwitch && oldAccount != nil && oldAccount.ID > 0 {
+			w.syncAccountStatusToRemote(oldAccount.ID, "limited", oldAccount.Quota, oldAccount.Quota)
 		}
 	} else if _, ok := limitInfo["used"]; ok {
 		if _, ok := limitInfo["quota"]; ok {
 			realUsed := asInt(limitInfo["used"], 0)
 			realQuota := asInt(limitInfo["quota"], 150)
+			// 在切换前保存旧账号信息，用于同步到后端
+			oldAccount := w.accounts.Current()
 			virtualUsed, virtualQuota, needSwitch := w.accounts.SyncUsage(realUsed, realQuota)
 			limitInfo["used"] = virtualUsed
 			limitInfo["quota"] = virtualQuota
 			modified = true
 			w.printStatus(virtualUsed, virtualQuota)
-			// 仅在账号额度用完时同步到后台
-			if needSwitch {
-				w.syncCurrentUsageToRemote()
+			// 账号额度用完时，同步旧账号状态到后台（触发后端二次检测）
+			if needSwitch && oldAccount != nil && oldAccount.ID > 0 {
+				w.syncAccountStatusToRemote(oldAccount.ID, "limited", oldAccount.Quota, oldAccount.Quota)
 			}
 		}
 	}
