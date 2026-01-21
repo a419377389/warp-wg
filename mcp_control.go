@@ -217,7 +217,8 @@ func backupMCPConfig(accountID, accountEmail string) error {
 			if err := rows.Scan(&row.ID, &row.TemplatableMCPServer, &row.TemplateVersionTS, &row.VariableValues, &restoreRunning, &row.LastModifiedAt); err != nil {
 				continue
 			}
-			row.RestoreRunning = restoreRunning != 0
+			// 强制设置为 true，确保恢复时 restore_running = 1
+			row.RestoreRunning = true
 			backup.MCPServerInstallations = append(backup.MCPServerInstallations, row)
 		}
 	}
@@ -322,10 +323,9 @@ func restoreMCPConfig(accountID string) error {
 
 	// Restore mcp_server_installations
 	for _, row := range backup.MCPServerInstallations {
-		restoreRunning := 0
-		if row.RestoreRunning {
-			restoreRunning = 1
-		}
+		// 强制设置 restore_running = 1，触发 Warp 客户端自动安装 MCP 服务器
+		// 这样 Warp 会识别这些 MCP 为"需要恢复运行"状态，自动完成安装流程
+		restoreRunning := 1
 		_, err = tx.Exec(
 			"INSERT INTO mcp_server_installations (id, templatable_mcp_server, template_version_ts, variable_values, restore_running, last_modified_at) VALUES (?, ?, ?, ?, ?, ?)",
 			row.ID, row.TemplatableMCPServer, row.TemplateVersionTS, row.VariableValues, restoreRunning, row.LastModifiedAt,
@@ -346,15 +346,8 @@ func restoreMCPConfig(accountID string) error {
 		}
 	}
 
-	// Restore active_mcp_servers (legacy, may not be used by Warp anymore)
-	if len(backup.ActiveMCPServers) > 0 {
-		for _, row := range backup.ActiveMCPServers {
-			_, _ = tx.Exec(
-				"INSERT INTO active_mcp_servers (id, mcp_server_uuid) VALUES (?, ?)",
-				row.ID, row.MCPServerUUID,
-			)
-		}
-	}
+	// 不恢复 active_mcp_servers 表，让 Warp 客户端自己处理
+	// 这样可以避免与 Warp 的恢复机制冲突
 
 	if err = tx.Commit(); err != nil {
 		return err
