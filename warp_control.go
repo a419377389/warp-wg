@@ -1192,85 +1192,75 @@ func parseExpiresIn(value any) time.Duration {
 	return 0
 }
 
-// Default表备份相关结构
-type DefaultTableBackup struct {
-	Data      []byte    `json:"data"`
-	CreatedAt time.Time `json:"createdAt"`
+// AgentProfileBackup Agent Profile备份结构
+type AgentProfileBackup struct {
+	Profiles  []AgentProfileRecord `json:"profiles"`
+	CreatedAt time.Time            `json:"createdAt"`
 }
 
-// backupWarpDefaultTable 备份Warp数据库中的Default表数据
+// AgentProfileRecord 单个Agent Profile记录
+type AgentProfileRecord struct {
+	ID   int64  `json:"id"`
+	Data string `json:"data"`
+}
+
+// backupWarpDefaultTable 备份Warp数据库中的Default Agent Profile数据
 func backupWarpDefaultTable() ([]byte, error) {
 	dbPath := warpSQLiteDB()
 	if dbPath == "" || !pathExists(dbPath) {
 		return nil, errors.New("warp database not found")
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// 检查Default表是否存在
-	var tableName string
-	err = db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name='Default'").Scan(&tableName)
+	// 查找所有包含name="Default"且is_default_profile=true的Agent Profile记录
+	rows, err := db.QueryContext(ctx, `SELECT id, data FROM generic_string_objects WHERE data LIKE '%"name"%' AND data LIKE '%"Default"%' AND data LIKE '%"is_default_profile"%'`)
 	if err != nil {
-		return nil, errors.New("Default table not found")
-	}
-
-	// 读取Default表的所有数据
-	rows, err := db.QueryContext(ctx, "SELECT * FROM Default")
-	if err != nil {
-		return nil, fmt.Errorf("failed to query Default table: %w", err)
+		return nil, fmt.Errorf("failed to query generic_string_objects: %w", err)
 	}
 	defer rows.Close()
 
-	// 获取列信息
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get columns: %w", err)
-	}
-
-	// 构建数据结构
-	var records []map[string]any
+	var profiles []AgentProfileRecord
 	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
+		var id int64
+		var data string
+		if err := rows.Scan(&id, &data); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
-
-		record := make(map[string]any)
-		for i, col := range columns {
-			record[col] = values[i]
+		// 验证是Agent Profile
+		var obj map[string]any
+		if json.Unmarshal([]byte(data), &obj) == nil {
+			if name, ok := obj["name"].(string); ok && name == "Default" {
+				if isDefault, ok := obj["is_default_profile"].(bool); ok && isDefault {
+					profiles = append(profiles, AgentProfileRecord{ID: id, Data: data})
+				}
+			}
 		}
-		records = append(records, record)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
-	// 序列化为JSON
-	backupData := DefaultTableBackup{
-		Data:      nil,
+	if len(profiles) == 0 {
+		return nil, errors.New("Default Agent Profile not found")
+	}
+
+	backup := AgentProfileBackup{
+		Profiles:  profiles,
 		CreatedAt: time.Now(),
 	}
 
-	data, err := json.Marshal(records)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal data: %w", err)
-	}
-	backupData.Data = data
-
-	finalData, err := json.Marshal(backupData)
+	finalData, err := json.Marshal(backup)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal backup: %w", err)
 	}
@@ -1278,7 +1268,7 @@ func backupWarpDefaultTable() ([]byte, error) {
 	return finalData, nil
 }
 
-// restoreWarpDefaultTable 还原Warp数据库中的Default表数据（在线更新，不关闭Warp）
+// restoreWarpDefaultTable 还原Warp数据库中的Default Agent Profile数据（在线更新，不关闭Warp）
 func restoreWarpDefaultTable(backupData []byte) error {
 	if len(backupData) == 0 {
 		return errors.New("backup data is empty")
@@ -1290,18 +1280,13 @@ func restoreWarpDefaultTable(backupData []byte) error {
 	}
 
 	// 解析备份数据
-	var backup DefaultTableBackup
+	var backup AgentProfileBackup
 	if err := json.Unmarshal(backupData, &backup); err != nil {
 		return fmt.Errorf("failed to unmarshal backup: %w", err)
 	}
 
-	var records []map[string]any
-	if err := json.Unmarshal(backup.Data, &records); err != nil {
-		return fmt.Errorf("failed to unmarshal records: %w", err)
-	}
-
-	if len(records) == 0 {
-		return errors.New("no records to restore")
+	if len(backup.Profiles) == 0 {
+		return errors.New("no profiles to restore")
 	}
 
 	// 使用WAL模式连接，避免锁定问题
@@ -1310,43 +1295,11 @@ func restoreWarpDefaultTable(backupData []byte) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
-
-	// 设置连接池参数，减少锁竞争
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-
-	// 检查Default表是否存在
-	var tableName string
-	err = db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name='Default'").Scan(&tableName)
-	if err != nil {
-		return errors.New("Default table not found")
-	}
-
-	// 获取表结构，用于构建正确的INSERT语句
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info(Default)")
-	if err != nil {
-		return fmt.Errorf("failed to get table info: %w", err)
-	}
-	columnOrder := []string{}
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dfltValue any
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
-			rows.Close()
-			return fmt.Errorf("failed to scan column info: %w", err)
-		}
-		columnOrder = append(columnOrder, name)
-	}
-	rows.Close()
-
-	if len(columnOrder) == 0 {
-		return errors.New("failed to get table columns")
-	}
 
 	// 开始事务
 	tx, err := db.BeginTx(ctx, nil)
@@ -1355,34 +1308,25 @@ func restoreWarpDefaultTable(backupData []byte) error {
 	}
 	defer tx.Rollback()
 
-	// 清空Default表
-	if _, err := tx.ExecContext(ctx, "DELETE FROM Default"); err != nil {
-		return fmt.Errorf("failed to clear Default table: %w", err)
-	}
-
-	// 插入备份数据
-	for _, record := range records {
-		// 按照表结构顺序构建INSERT语句
-		values := make([]any, 0, len(columnOrder))
-		for _, col := range columnOrder {
-			if val, ok := record[col]; ok {
-				values = append(values, val)
-			} else {
-				values = append(values, nil)
+	// 为每个备份的Profile更新数据库
+	for _, profile := range backup.Profiles {
+		// 检查该ID的记录是否存在
+		var existingID int64
+		err := tx.QueryRowContext(ctx, "SELECT id FROM generic_string_objects WHERE id = ?", profile.ID).Scan(&existingID)
+		if err == sql.ErrNoRows {
+			// 不存在，插入新记录
+			_, err = tx.ExecContext(ctx, "INSERT INTO generic_string_objects (id, data) VALUES (?, ?)", profile.ID, profile.Data)
+			if err != nil {
+				return fmt.Errorf("failed to insert profile: %w", err)
 			}
-		}
-
-		placeholders := make([]string, len(columnOrder))
-		for i := range placeholders {
-			placeholders[i] = "?"
-		}
-
-		query := fmt.Sprintf("INSERT INTO Default (%s) VALUES (%s)",
-			strings.Join(columnOrder, ", "),
-			strings.Join(placeholders, ", "))
-
-		if _, err := tx.ExecContext(ctx, query, values...); err != nil {
-			return fmt.Errorf("failed to insert record: %w", err)
+		} else if err == nil {
+			// 存在，更新记录
+			_, err = tx.ExecContext(ctx, "UPDATE generic_string_objects SET data = ? WHERE id = ?", profile.Data, profile.ID)
+			if err != nil {
+				return fmt.Errorf("failed to update profile: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to check existing profile: %w", err)
 		}
 	}
 
