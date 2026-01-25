@@ -793,7 +793,7 @@ func (a *App) handleDefaultTableBackupStatus(w http.ResponseWriter, r *http.Requ
 		// 读取备份信息
 		backupData, err := loadDefaultTableBackup(backupPath)
 		if err == nil {
-			var backup DefaultTableBackup
+			var backup AgentProfileBackup
 			if json.Unmarshal(backupData, &backup) == nil {
 				response["createdAt"] = backup.CreatedAt
 			}
