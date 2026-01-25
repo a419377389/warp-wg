@@ -1222,14 +1222,14 @@ func backupWarpDefaultTable() ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// 查找所有包含name="Default"且is_default_profile=true的Agent Profile记录
-	rows, err := db.QueryContext(ctx, `SELECT id, data FROM generic_string_objects WHERE data LIKE '%"name"%' AND data LIKE '%"Default"%' AND data LIKE '%"is_default_profile"%'`)
+	// 查找所有包含name="Default"且is_default_profile=true的Agent Profile记录，按ID降序排列取最新的一条
+	rows, err := db.QueryContext(ctx, `SELECT id, data FROM generic_string_objects WHERE data LIKE '%"name"%' AND data LIKE '%"Default"%' AND data LIKE '%"is_default_profile"%' ORDER BY id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query generic_string_objects: %w", err)
 	}
 	defer rows.Close()
 
-	var profiles []AgentProfileRecord
+	var latestProfile *AgentProfileRecord
 	for rows.Next() {
 		var id int64
 		var data string
@@ -1241,7 +1241,11 @@ func backupWarpDefaultTable() ([]byte, error) {
 		if json.Unmarshal([]byte(data), &obj) == nil {
 			if name, ok := obj["name"].(string); ok && name == "Default" {
 				if isDefault, ok := obj["is_default_profile"].(bool); ok && isDefault {
-					profiles = append(profiles, AgentProfileRecord{ID: id, Data: data})
+					// 只保留第一条（ID最大的）
+					if latestProfile == nil {
+						latestProfile = &AgentProfileRecord{ID: id, Data: data}
+					}
+					break
 				}
 			}
 		}
@@ -1251,9 +1255,11 @@ func backupWarpDefaultTable() ([]byte, error) {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
-	if len(profiles) == 0 {
+	if latestProfile == nil {
 		return nil, errors.New("Default Agent Profile not found")
 	}
+
+	profiles := []AgentProfileRecord{*latestProfile}
 
 	backup := AgentProfileBackup{
 		Profiles:  profiles,
@@ -1308,25 +1314,35 @@ func restoreWarpDefaultTable(backupData []byte) error {
 	}
 	defer tx.Rollback()
 
-	// 为每个备份的Profile更新数据库
+	// 先查找并删除所有现有的Default Agent Profile记录
+	delRows, err := tx.QueryContext(ctx, `SELECT id FROM generic_string_objects WHERE data LIKE '%"name"%' AND data LIKE '%"Default"%' AND data LIKE '%"is_default_profile"%'`)
+	if err != nil {
+		return fmt.Errorf("failed to query existing profiles: %w", err)
+	}
+	var idsToDelete []int64
+	for delRows.Next() {
+		var id int64
+		if err := delRows.Scan(&id); err != nil {
+			delRows.Close()
+			return fmt.Errorf("failed to scan id: %w", err)
+		}
+		idsToDelete = append(idsToDelete, id)
+	}
+	delRows.Close()
+
+	// 删除所有旧的Default Profile记录
+	for _, id := range idsToDelete {
+		_, err = tx.ExecContext(ctx, "DELETE FROM generic_string_objects WHERE id = ?", id)
+		if err != nil {
+			return fmt.Errorf("failed to delete old profile id=%d: %w", id, err)
+		}
+	}
+
+	// 插入备份的Profile
 	for _, profile := range backup.Profiles {
-		// 检查该ID的记录是否存在
-		var existingID int64
-		err := tx.QueryRowContext(ctx, "SELECT id FROM generic_string_objects WHERE id = ?", profile.ID).Scan(&existingID)
-		if err == sql.ErrNoRows {
-			// 不存在，插入新记录
-			_, err = tx.ExecContext(ctx, "INSERT INTO generic_string_objects (id, data) VALUES (?, ?)", profile.ID, profile.Data)
-			if err != nil {
-				return fmt.Errorf("failed to insert profile: %w", err)
-			}
-		} else if err == nil {
-			// 存在，更新记录
-			_, err = tx.ExecContext(ctx, "UPDATE generic_string_objects SET data = ? WHERE id = ?", profile.Data, profile.ID)
-			if err != nil {
-				return fmt.Errorf("failed to update profile: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to check existing profile: %w", err)
+		_, err = tx.ExecContext(ctx, "INSERT INTO generic_string_objects (id, data) VALUES (?, ?)", profile.ID, profile.Data)
+		if err != nil {
+			return fmt.Errorf("failed to insert profile: %w", err)
 		}
 	}
 
