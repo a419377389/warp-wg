@@ -1191,3 +1191,234 @@ func parseExpiresIn(value any) time.Duration {
 	}
 	return 0
 }
+
+// Default表备份相关结构
+type DefaultTableBackup struct {
+	Data      []byte    `json:"data"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// backupWarpDefaultTable 备份Warp数据库中的Default表数据
+func backupWarpDefaultTable() ([]byte, error) {
+	dbPath := warpSQLiteDB()
+	if dbPath == "" || !pathExists(dbPath) {
+		return nil, errors.New("warp database not found")
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 检查Default表是否存在
+	var tableName string
+	err = db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name='Default'").Scan(&tableName)
+	if err != nil {
+		return nil, errors.New("Default table not found")
+	}
+
+	// 读取Default表的所有数据
+	rows, err := db.QueryContext(ctx, "SELECT * FROM Default")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query Default table: %w", err)
+	}
+	defer rows.Close()
+
+	// 获取列信息
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	// 构建数据结构
+	var records []map[string]any
+	for rows.Next() {
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		record := make(map[string]any)
+		for i, col := range columns {
+			record[col] = values[i]
+		}
+		records = append(records, record)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	// 序列化为JSON
+	backupData := DefaultTableBackup{
+		Data:      nil,
+		CreatedAt: time.Now(),
+	}
+
+	data, err := json.Marshal(records)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal data: %w", err)
+	}
+	backupData.Data = data
+
+	finalData, err := json.Marshal(backupData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal backup: %w", err)
+	}
+
+	return finalData, nil
+}
+
+// restoreWarpDefaultTable 还原Warp数据库中的Default表数据（在线更新，不关闭Warp）
+func restoreWarpDefaultTable(backupData []byte) error {
+	if len(backupData) == 0 {
+		return errors.New("backup data is empty")
+	}
+
+	dbPath := warpSQLiteDB()
+	if dbPath == "" || !pathExists(dbPath) {
+		return errors.New("warp database not found")
+	}
+
+	// 解析备份数据
+	var backup DefaultTableBackup
+	if err := json.Unmarshal(backupData, &backup); err != nil {
+		return fmt.Errorf("failed to unmarshal backup: %w", err)
+	}
+
+	var records []map[string]any
+	if err := json.Unmarshal(backup.Data, &records); err != nil {
+		return fmt.Errorf("failed to unmarshal records: %w", err)
+	}
+
+	if len(records) == 0 {
+		return errors.New("no records to restore")
+	}
+
+	// 使用WAL模式连接，避免锁定问题
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_timeout=5000")
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	// 设置连接池参数，减少锁竞争
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// 检查Default表是否存在
+	var tableName string
+	err = db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name='Default'").Scan(&tableName)
+	if err != nil {
+		return errors.New("Default table not found")
+	}
+
+	// 获取表结构，用于构建正确的INSERT语句
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(Default)")
+	if err != nil {
+		return fmt.Errorf("failed to get table info: %w", err)
+	}
+	columnOrder := []string{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dfltValue any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("failed to scan column info: %w", err)
+		}
+		columnOrder = append(columnOrder, name)
+	}
+	rows.Close()
+
+	if len(columnOrder) == 0 {
+		return errors.New("failed to get table columns")
+	}
+
+	// 开始事务
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 清空Default表
+	if _, err := tx.ExecContext(ctx, "DELETE FROM Default"); err != nil {
+		return fmt.Errorf("failed to clear Default table: %w", err)
+	}
+
+	// 插入备份数据
+	for _, record := range records {
+		// 按照表结构顺序构建INSERT语句
+		values := make([]any, 0, len(columnOrder))
+		for _, col := range columnOrder {
+			if val, ok := record[col]; ok {
+				values = append(values, val)
+			} else {
+				values = append(values, nil)
+			}
+		}
+
+		placeholders := make([]string, len(columnOrder))
+		for i := range placeholders {
+			placeholders[i] = "?"
+		}
+
+		query := fmt.Sprintf("INSERT INTO Default (%s) VALUES (%s)",
+			strings.Join(columnOrder, ", "),
+			strings.Join(placeholders, ", "))
+
+		if _, err := tx.ExecContext(ctx, query, values...); err != nil {
+			return fmt.Errorf("failed to insert record: %w", err)
+		}
+	}
+
+	// 提交事务
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// hasDefaultTableBackup 检查是否存在Default表备份
+func hasDefaultTableBackup(backupPath string) bool {
+	if backupPath == "" {
+		return false
+	}
+	return pathExists(backupPath)
+}
+
+// loadDefaultTableBackup 加载Default表备份
+func loadDefaultTableBackup(backupPath string) ([]byte, error) {
+	if !pathExists(backupPath) {
+		return nil, errors.New("backup file not found")
+	}
+	return os.ReadFile(backupPath)
+}
+
+// saveDefaultTableBackup 保存Default表备份
+func saveDefaultTableBackup(backupPath string, data []byte) error {
+	if backupPath == "" {
+		return errors.New("backup path is empty")
+	}
+	// 确保目录存在
+	dir := filepath.Dir(backupPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	return os.WriteFile(backupPath, data, 0o644)
+}

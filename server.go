@@ -47,6 +47,10 @@ func (a *App) startHTTP(port int) error {
 	mux.HandleFunc("/api/mcp/restore", a.handleMCPRestore)
 	mux.HandleFunc("/api/mcp/backups", a.handleMCPBackups)
 	mux.HandleFunc("/api/mcp/backup/delete", a.handleMCPBackupDelete)
+	mux.HandleFunc("/api/default/backup", a.handleDefaultTableBackup)
+	mux.HandleFunc("/api/default/restore", a.handleDefaultTableRestore)
+	mux.HandleFunc("/api/default/status", a.handleDefaultTableBackupStatus)
+	mux.HandleFunc("/api/default/delete", a.handleDefaultTableBackupDelete)
 	mux.HandleFunc("/api/logs/stream", a.handleLogStream)
 	mux.HandleFunc("/api/logs/tail", a.handleLogTail)
 

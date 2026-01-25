@@ -107,7 +107,8 @@ func getMCPServers() ([]MCPServer, error) {
 		return nil, errors.New("warp database not found")
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// 使用WAL模式连接，支持在线热读取
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_timeout=5000")
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +161,8 @@ func getActiveMCPServers() ([]string, error) {
 		return nil, errors.New("warp database not found")
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// 使用WAL模式连接，支持在线热读取
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_timeout=5000")
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +197,8 @@ func backupMCPConfig(accountID, accountEmail string) error {
 		return errors.New("warp database not found")
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// 使用WAL模式连接，支持在线热读取
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_timeout=5000")
 	if err != nil {
 		return err
 	}
@@ -299,11 +302,16 @@ func restoreMCPConfig(accountID string) error {
 		return errors.New("warp database not found")
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// 使用WAL模式连接，支持在线热更新
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_timeout=5000")
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	// 设置连接池参数，减少锁竞争
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	// Begin transaction
 	tx, err := db.Begin()

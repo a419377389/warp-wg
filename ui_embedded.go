@@ -789,6 +789,31 @@ func init() {
           </div>
         </section>
 
+        <section class="card" style="grid-column: span 6; animation-delay: 0.15s;">
+          <div class="card-header">
+            <div class="card-title">
+              <span data-i18n="sectionBackup"></span>
+              <span class="card-title-divider">/</span>
+              <span data-i18n="sectionRestore"></span>
+            </div>
+          </div>
+          <p style="font-size: 13px; color: var(--muted); margin-bottom: 14px;" data-i18n="backupDesc"></p>
+          <div class="field-grid">
+            <div class="field">
+              <div class="label" data-i18n="defaultBackupLabel"></div>
+              <div class="value" id="defaultBackupStatus">--</div>
+            </div>
+            <div class="field">
+              <div class="label" data-i18n="mcpBackupLabel"></div>
+              <div class="value" id="mcpBackupStatus">--</div>
+            </div>
+          </div>
+          <div class="card-actions" style="margin-top: 14px;">
+            <button class="btn primary" id="backupAllBtn" data-i18n="backupAll"></button>
+            <button class="btn ghost" id="restoreAllBtn" data-i18n="restoreAll"></button>
+          </div>
+        </section>
+
         <section class="card logs" style="animation-delay: 0.2s;">
           <div class="card-header">
             <div class="card-title" data-i18n="sectionLogs"></div>
@@ -877,7 +902,22 @@ func init() {
         toastPathAutoSuccess: "\u5df2\u81ea\u52a8\u68c0\u6d4b",
         toastPathSaved: "\u8def\u5f84\u5df2\u4fdd\u5b58",
         toastInputCode: "\u8bf7\u8f93\u5165\u5361\u5bc6",
-        toastInputPath: "\u8bf7\u586b\u5199\u8def\u5f84"
+        toastInputPath: "\u8bf7\u586b\u5199\u8def\u5f84",
+        sectionBackup: "\u914d\u7f6e\u5907\u4efd",
+        sectionRestore: "\u81ea\u52a8\u8fd8\u539f",
+        backupDesc: "\u5907\u4efdWarp\u914d\u7f6e\uff0c\u5207\u6362\u8d26\u53f7\u540e\u81ea\u52a8\u8fd8\u539f",
+        defaultBackupLabel: "Default\u8868\u5907\u4efd",
+        mcpBackupLabel: "MCP\u5907\u4efd",
+        backupAll: "\u5907\u4efd\u5168\u90e8",
+        restoreAll: "\u8fd8\u539f\u5168\u90e8",
+        toastBackupSuccess: "\u5907\u4efd\u6210\u529f",
+        toastBackupFailed: "\u5907\u4efd\u5931\u8d25",
+        toastRestoreSuccess: "\u8fd8\u539f\u6210\u529f",
+        toastRestoreFailed: "\u8fd8\u539f\u5931\u8d25",
+        toastBackuping: "\u6b63\u5728\u5907\u4efd...",
+        toastRestoring: "\u6b63\u5728\u8fd8\u539f...",
+        backupStatusYes: "\u5df2\u5907\u4efd",
+        backupStatusNo: "\u672a\u5907\u4efd"
       };
 
       const statusLabels = {
@@ -917,6 +957,10 @@ func init() {
         totalQuota: $("totalQuota"),
         totalUsed: $("totalUsed"),
         totalVirtualUsed: $("totalVirtualUsed"),
+        defaultBackupStatus: $("defaultBackupStatus"),
+        mcpBackupStatus: $("mcpBackupStatus"),
+        backupAllBtn: $("backupAllBtn"),
+        restoreAllBtn: $("restoreAllBtn"),
         warpPath: $("warpPath"),
         autoDetectBtn: $("autoDetectBtn"),
         savePathBtn: $("savePathBtn"),
@@ -1134,6 +1178,26 @@ func init() {
         }
       }
 
+      function updateBackupStatus(defaultStatus, mcpStatus) {
+        if (defaultStatus?.hasBackup) {
+          const time = defaultStatus.createdAt ? new Date(defaultStatus.createdAt).toLocaleString("zh-CN", { hour12: false }) : "";
+          elements.defaultBackupStatus.textContent = i18n.backupStatusYes + (time ? " (" + time + ")" : "");
+          elements.defaultBackupStatus.style.color = "#16a34a";
+        } else {
+          elements.defaultBackupStatus.textContent = i18n.backupStatusNo;
+          elements.defaultBackupStatus.style.color = "#64748b";
+        }
+        if (mcpStatus?.backups && mcpStatus.backups.length > 0) {
+          const backup = mcpStatus.backups[0];
+          const time = backup.backupTime ? new Date(backup.backupTime).toLocaleString("zh-CN", { hour12: false }) : "";
+          elements.mcpBackupStatus.textContent = i18n.backupStatusYes + (time ? " (" + time + ")" : "");
+          elements.mcpBackupStatus.style.color = "#16a34a";
+        } else {
+          elements.mcpBackupStatus.textContent = i18n.backupStatusNo;
+          elements.mcpBackupStatus.style.color = "#64748b";
+        }
+      }
+
       function setNoticeLink(el, message, link) {
         if (!el) return;
         el.textContent = message;
@@ -1189,18 +1253,21 @@ func init() {
       }
 
       async function loadAll() {
-        const [activation, accounts, gateway, warp, notice] = await Promise.all([
+        const [activation, accounts, gateway, warp, notice, defaultStatus, mcpStatus] = await Promise.all([
           apiGet("/api/activation/status").catch(() => ({})),
           apiGet("/api/accounts").catch(() => ({})),
           apiGet("/api/gateway/status").catch(() => ({})),
           apiGet("/api/warp/status").catch(() => ({})),
-          apiGet("/api/notice").catch(() => ({}))
+          apiGet("/api/notice").catch(() => ({})),
+          apiGet("/api/default/status").catch(() => ({})),
+          apiGet("/api/mcp/backups").catch(() => ({}))
         ]);
         updateActivation(activation);
         updateAccounts(accounts);
         updateGatewayStatus(gateway);
         updateWarpStatus(warp);
         updateNotice(notice);
+        updateBackupStatus(defaultStatus, mcpStatus);
       }
 
       async function initLogs() {
@@ -1339,6 +1406,41 @@ func init() {
 
       elements.clearLogBtn.addEventListener("click", () => {
         elements.logLines.innerHTML = "";
+      });
+
+      elements.backupAllBtn.addEventListener("click", async () => {
+        showToast(i18n.toastBackuping);
+        const [defaultRes, mcpRes] = await Promise.all([
+          apiPost("/api/default/backup").catch(() => ({ success: false })),
+          apiPost("/api/mcp/backup").catch(() => ({ success: false }))
+        ]);
+        const errors = [];
+        if (!defaultRes.success) errors.push("Default");
+        if (!mcpRes.success) errors.push("MCP");
+        if (errors.length === 0) {
+          showToast(i18n.toastBackupSuccess);
+        } else {
+          showToast(i18n.toastBackupFailed + ": " + errors.join(", "), false);
+        }
+        await loadAll();
+      });
+
+      elements.restoreAllBtn.addEventListener("click", async () => {
+        if (!confirm("\u786e\u5b9a\u8981\u8fd8\u539f\u6240\u6709\u5907\u4efd\u5417\uff1f")) return;
+        showToast(i18n.toastRestoring);
+        const [defaultRes, mcpRes] = await Promise.all([
+          apiPost("/api/default/restore").catch(() => ({ success: false })),
+          apiPost("/api/mcp/restore").catch(() => ({ success: false }))
+        ]);
+        const errors = [];
+        if (!defaultRes.success) errors.push("Default");
+        if (!mcpRes.success) errors.push("MCP");
+        if (errors.length === 0) {
+          showToast(i18n.toastRestoreSuccess);
+        } else {
+          showToast(i18n.toastRestoreFailed + ": " + errors.join(", "), false);
+        }
+        await loadAll();
       });
 
       applyI18n();

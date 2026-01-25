@@ -311,11 +311,7 @@ func (a *App) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 
 	_ = resetMachineID()
 
-	if restartWarp {
-		_ = a.stopWarp()
-		time.Sleep(2500 * time.Millisecond)
-	}
-
+	// 在线更新Warp数据库，不重启Warp客户端
 	// MCP sync: backup current account's MCP config and restore target's
 	mcpHandled := false
 	if err := switchAccountWithMCP(snapshot.CurrentAccount, acc, a.log); err != nil {
@@ -329,7 +325,20 @@ func (a *App) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 		mcpHandled = true
 	}
 
+	// 在线还原Default表（延迟2秒等待凭证更新完成）
+	go func() {
+		time.Sleep(2 * time.Second)
+		a.restoreDefaultTableIfExists()
+	}()
+
+	if mcpHandled {
+		a.markMCPSyncHandled(acc.Email)
+	}
+
+	// 如果用户选择重启Warp，则执行重启（可选）
 	if restartWarp {
+		_ = a.stopWarp()
+		time.Sleep(2500 * time.Millisecond)
 		proxy := ""
 		if running, port, _ := a.gatewayStatus(); running && port > 0 {
 			proxy = "http://127.0.0.1:" + strconv.Itoa(port)
@@ -337,10 +346,6 @@ func (a *App) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 		_, _ = a.startWarp(proxy)
 		// Schedule MCP restore after Warp starts
 		scheduleGlobalMCPRestore(5*time.Second, a.log)
-	}
-
-	if mcpHandled {
-		a.markMCPSyncHandled(acc.Email)
 	}
 
 	acc.LastUsed = float64(time.Now().Unix())
@@ -705,5 +710,116 @@ func (a *App) handleMCPBackupDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.log.Info("[MCP] deleted global backup")
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// handleDefaultTableBackup 处理Default表备份请求
+func (a *App) handleDefaultTableBackup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+
+	// 备份Default表数据
+	backupData, err := backupWarpDefaultTable()
+	if err != nil {
+		a.log.Error("[Default] backup failed: " + err.Error())
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+
+	// 保存备份到文件
+	backupPath := a.getDefaultTableBackupPath()
+	if err := saveDefaultTableBackup(backupPath, backupData); err != nil {
+		a.log.Error("[Default] save backup failed: " + err.Error())
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+
+	a.log.Info("[Default] table backup created successfully")
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Default table backup created"})
+}
+
+// handleDefaultTableRestore 处理Default表还原请求
+func (a *App) handleDefaultTableRestore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+
+	backupPath := a.getDefaultTableBackupPath()
+	if !hasDefaultTableBackup(backupPath) {
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": "no backup found"})
+		return
+	}
+
+	// 加载备份数据
+	backupData, err := loadDefaultTableBackup(backupPath)
+	if err != nil {
+		a.log.Error("[Default] load backup failed: " + err.Error())
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+
+	// 还原备份数据
+	if err := restoreWarpDefaultTable(backupData); err != nil {
+		a.log.Error("[Default] restore failed: " + err.Error())
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+
+	a.log.Info("[Default] table restored successfully")
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Default table restored"})
+}
+
+// handleDefaultTableBackupStatus 检查Default表备份状态
+func (a *App) handleDefaultTableBackupStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+
+	backupPath := a.getDefaultTableBackupPath()
+	hasBackup := hasDefaultTableBackup(backupPath)
+
+	response := map[string]any{
+		"success":   true,
+		"hasBackup": hasBackup,
+	}
+
+	if hasBackup {
+		// 读取备份信息
+		backupData, err := loadDefaultTableBackup(backupPath)
+		if err == nil {
+			var backup DefaultTableBackup
+			if json.Unmarshal(backupData, &backup) == nil {
+				response["createdAt"] = backup.CreatedAt
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+// handleDefaultTableBackupDelete 删除Default表备份
+func (a *App) handleDefaultTableBackupDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+
+	backupPath := a.getDefaultTableBackupPath()
+	if !hasDefaultTableBackup(backupPath) {
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": "no backup found"})
+		return
+	}
+
+	if err := os.Remove(backupPath); err != nil {
+		a.log.Error("[Default] delete backup failed: " + err.Error())
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+
+	a.log.Info("[Default] backup deleted")
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }

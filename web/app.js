@@ -19,6 +19,10 @@ const elements = {
   totalUsed: $("totalUsed"),
   accountSelect: $("accountSelect"),
   switchBtn: $("switchBtn"),
+  defaultBackupStatus: $("defaultBackupStatus"),
+  mcpBackupStatus: $("mcpBackupStatus"),
+  backupAllBtn: $("backupAllBtn"),
+  restoreAllBtn: $("restoreAllBtn"),
   warpPath: $("warpPath"),
   autoDetectBtn: $("autoDetectBtn"),
   savePathBtn: $("savePathBtn"),
@@ -142,6 +146,27 @@ function updateWarpStatus(data) {
   }
 }
 
+function updateBackupStatus(defaultStatus, mcpStatus) {
+  if (defaultStatus?.hasBackup) {
+    const time = defaultStatus.createdAt ? new Date(defaultStatus.createdAt).toLocaleString("zh-CN", { hour12: false }) : "未知";
+    elements.defaultBackupStatus.textContent = `已备份 (${time})`;
+    elements.defaultBackupStatus.style.color = "#10b981";
+  } else {
+    elements.defaultBackupStatus.textContent = "未备份";
+    elements.defaultBackupStatus.style.color = "#6b7280";
+  }
+
+  if (mcpStatus?.backups && mcpStatus.backups.length > 0) {
+    const backup = mcpStatus.backups[0];
+    const time = backup.backupTime ? new Date(backup.backupTime).toLocaleString("zh-CN", { hour12: false }) : "未知";
+    elements.mcpBackupStatus.textContent = `已备份 (${time})`;
+    elements.mcpBackupStatus.style.color = "#10b981";
+  } else {
+    elements.mcpBackupStatus.textContent = "未备份";
+    elements.mcpBackupStatus.style.color = "#6b7280";
+  }
+}
+
 function appendLog(line) {
   if (!line) return;
   const div = document.createElement("div");
@@ -154,16 +179,19 @@ function appendLog(line) {
 }
 
 async function loadAll() {
-  const [activation, accounts, gateway, warp] = await Promise.all([
+  const [activation, accounts, gateway, warp, defaultStatus, mcpStatus] = await Promise.all([
     apiGet("/api/activation/status").catch(() => ({})),
     apiGet("/api/accounts").catch(() => ({})),
     apiGet("/api/gateway/status").catch(() => ({})),
-    apiGet("/api/warp/status").catch(() => ({}))
+    apiGet("/api/warp/status").catch(() => ({})),
+    apiGet("/api/default/status").catch(() => ({})),
+    apiGet("/api/mcp/backups").catch(() => ({}))
   ]);
   updateActivation(activation);
   updateAccounts(accounts);
   updateGatewayStatus(gateway);
   updateWarpStatus(warp);
+  updateBackupStatus(defaultStatus, mcpStatus);
 }
 
 async function initLogs() {
@@ -293,6 +321,58 @@ elements.gatewayStopBtn.addEventListener("click", async () => {
 
 elements.clearLogBtn.addEventListener("click", () => {
   elements.logLines.innerHTML = "";
+});
+
+// 备份全部（Default表 + MCP）
+elements.backupAllBtn.addEventListener("click", async () => {
+  showToast("正在备份...");
+  
+  const [defaultRes, mcpRes] = await Promise.all([
+    apiPost("/api/default/backup").catch(() => ({ success: false, error: "Default表备份失败" })),
+    apiPost("/api/mcp/backup").catch(() => ({ success: false, error: "MCP备份失败" }))
+  ]);
+
+  const errors = [];
+  if (!defaultRes.success) errors.push("Default表");
+  if (!mcpRes.success) errors.push("MCP");
+
+  if (errors.length === 0) {
+    showToast("备份成功！");
+  } else if (errors.length === 2) {
+    showToast("备份失败", false);
+  } else {
+    showToast(`${errors.join(", ")}备份失败`, false);
+  }
+
+  await loadAll();
+});
+
+// 还原全部（Default表 + MCP）
+elements.restoreAllBtn.addEventListener("click", async () => {
+  if (!confirm("确定要还原所有备份吗？")) {
+    return;
+  }
+
+  showToast("正在还原...");
+
+  const [defaultRes, mcpRes] = await Promise.all([
+    apiPost("/api/default/restore").catch(() => ({ success: false, error: "Default表还原失败" })),
+    apiPost("/api/mcp/restore").catch(() => ({ success: false, error: "MCP还原失败" }))
+  ]);
+
+  const errors = [];
+  if (!defaultRes.success) errors.push("Default表");
+  if (!mcpRes.success) errors.push("MCP");
+
+  if (errors.length === 0) {
+    showToast("还原成功！");
+  } else if (errors.length === 2) {
+    showToast("还原失败", false);
+  } else {
+    showToast(`${errors.join(", ")}还原失败`, false);
+  }
+
+  await loadAll();
 });
 
 loadAll();

@@ -96,3 +96,35 @@ func (a *App) getRemoteCredentials() (token, deviceID string) {
 	defer a.cfgMu.Unlock()
 	return a.cfg.Token, a.cfg.DeviceID
 }
+
+// getDefaultTableBackupPath 返回Default表备份文件路径
+func (a *App) getDefaultTableBackupPath() string {
+	return a.paths.DataDir + "/default_table_backup.json"
+}
+
+// restoreDefaultTableIfExists 如果存在Default表备份，则自动还原
+func (a *App) restoreDefaultTableIfExists() {
+	backupPath := a.getDefaultTableBackupPath()
+	if !hasDefaultTableBackup(backupPath) {
+		return
+	}
+
+	backupData, err := loadDefaultTableBackup(backupPath)
+	if err != nil {
+		if a.log != nil {
+			a.log.Warn("[Default] load backup failed: " + err.Error())
+		}
+		return
+	}
+
+	if err := restoreWarpDefaultTable(backupData); err != nil {
+		if a.log != nil {
+			a.log.Error("[Default] auto restore failed: " + err.Error())
+		}
+		return
+	}
+
+	if a.log != nil {
+		a.log.Info("[Default] table auto restored successfully")
+	}
+}

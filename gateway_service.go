@@ -91,12 +91,18 @@ func newGatewayService(app *App, port int) (*GatewayService, error) {
 		if strings.TrimSpace(prev) != "" {
 			prevAcc = &Account{Email: prev}
 		}
+		// 在线更新Warp数据库，不重启Warp客户端
 		if err := switchAccountWithMCP(prevAcc, current, app.log); err != nil {
 			if app.log != nil {
 				app.log.Warn("switch account with MCP sync failed: " + err.Error())
 			}
 			_ = updateWarpCredentialsWithLog(*current, app.log, reason)
 		}
+		// 在线还原Default表（延迟2秒等待凭证更新完成）
+		go func() {
+			time.Sleep(2 * time.Second)
+			app.restoreDefaultTableIfExists()
+		}()
 	})
 	if snapshot, ok := app.getMemorySnapshot(); ok {
 		accountMgr.LoadSnapshot(snapshot, true)
